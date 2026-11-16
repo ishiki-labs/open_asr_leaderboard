@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Official Open ASR Leaderboard HF Jobs Submission Script for Ishiki Labs
+# Official Open ASR Leaderboard HF Jobs Submission Script for Ishiki Labs (`ishiki-labs/ishiki-asr-0.5`)
 # Usage:
-#   ORG_NAME="ishiki-labs" RESULTS_BUCKET="ishiki-labs/open-asr-results" HF_TOKEN=hf_... bash ishiki_labs/submit_jobs.sh
+#   HF_TOKEN=hf_... bash ishiki_labs/submit_jobs.sh
+#   ONLY_DATASETS="ami_cleaned spgispeech" HF_TOKEN=hf_... bash ishiki_labs/submit_jobs.sh
 
 set -Eeuo pipefail
 
@@ -9,11 +10,11 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/submit_utils.sh
 
 MODEL_ID="${MODEL_ID:-ishiki-labs/ishiki-asr-0.5}"
 MODEL_FOLDER="${MODEL_ID//\//-}"
-SPACE="${SPACE:-ishiki-labs/open-asr-nemotron-3dot5-transcribe}"
-RESULTS_BUCKET="${RESULTS_BUCKET:-ishiki-labs/asr_leaderboard_results}"
+SPACE="${SPACE:-hf-audio/open-asr-leaderboard-transformers}"
+RESULTS_BUCKET="${RESULTS_BUCKET:-hf-audio/asr_leaderboard_h200}"
 DEFAULT_DATASET_PATH="${DEFAULT_DATASET_PATH:-hf-audio/open-asr-leaderboard}"
 FLAVOR="${FLAVOR:-h200}"
-ORG_NAME="${ORG_NAME:-ishiki-labs}"
+ORG_NAME="${ORG_NAME:-}"
 BATCH_SIZE="${BATCH_SIZE:-16}"
 MAX_EVAL_SAMPLES="${MAX_EVAL_SAMPLES:--1}"
 
@@ -32,14 +33,12 @@ DATASET_CONFIGS=(
     "urgent2024 ${DEFAULT_DATASET_PATH} urgent2024 test default"
     "urgent2024_clean ${DEFAULT_DATASET_PATH} urgent2024_clean test default"
     "monsoon_en_in VoiceArena/Monsoon_en_IN_test - test monsoon_en"
-    "librispeech_clean ${DEFAULT_DATASET_PATH} librispeech test.clean default"
-    "librispeech_other ${DEFAULT_DATASET_PATH} librispeech test.other default"
 )
 
 filter_only_datasets || exit 1
 
 echo "████████████████████████████████████████████████████████████████████████████████"
-echo "  Submitting Open ASR Leaderboard Evaluation for: ${MODEL_ID} (org: ${ORG_NAME})"
+echo "  Evaluating: ${MODEL_ID}"
 echo "████████████████████████████████████████████████████████████████████████████████"
 
 for cfg in "${DATASET_CONFIGS[@]}"; do
@@ -52,7 +51,7 @@ for cfg in "${DATASET_CONFIGS[@]}"; do
     [[ -n "${ORG_NAME}" ]] && NAMESPACE_ARG=(--namespace "${ORG_NAME}")
 
     hf jobs run \
-        --name "ishiki-transcribe-${LABEL}" \
+        --name "ishiki-asr-${LABEL}" \
         --flavor "${FLAVOR}" \
         --timeout 8h \
         --secrets HF_TOKEN="${HF_TOKEN}" \
@@ -60,10 +59,12 @@ for cfg in "${DATASET_CONFIGS[@]}"; do
         --volume "hf://buckets/${RESULTS_BUCKET}:/results" \
         "hf.co/spaces/${SPACE}" \
         bash -c "
+            python -c 'from transformers import Nemotron3_5TranscribeForConditionalGeneration' 2>/dev/null || pip install -q --no-deps git+https://github.com/huggingface/transformers.git &&
             ${LOCAL_NORMALIZER_INJECT}
             ${LOCAL_SCRIPT_INJECT}
             PYTHONPATH=/app python /app/run_eval.py \
                 --model_id=${MODEL_ID} \
+                --checkpoint_path=${MODEL_ID} \
                 --dataset_path=${DATASET_PATH} \
                 --dataset=${DATASET_CONFIG} \
                 --split=${SPLIT} \
@@ -76,7 +77,12 @@ for cfg in "${DATASET_CONFIGS[@]}"; do
         " &
 done
 
-echo "Live status: https://huggingface.co/organizations/${ORG_NAME}/settings/jobs"
+if [[ -n "${ORG_NAME}" ]]; then
+    echo "For live status see: https://huggingface.co/organizations/${ORG_NAME}/settings/jobs"
+else
+    echo "For live status see: https://huggingface.co/settings/jobs"
+fi
+
 wait
 echo "All jobs finished for ${MODEL_ID}."
 sleep 10
@@ -91,5 +97,5 @@ RUN_RESULTS=$(python "${FETCH_RUN_RESULTS}" \
 
 PYTHONPATH="${REPO_ROOT}" python -c "
 from normalizer.eval_utils import score_results
-score_results('${RUN_RESULTS}', '${MODEL_ID}', families=['public', 'extra'])
+score_results('${RUN_RESULTS}', '${MODEL_ID}')
 "

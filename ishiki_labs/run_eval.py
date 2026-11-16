@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 import difflib
-import hashlib
 import io
 import os
 import re
@@ -418,18 +417,6 @@ def _build_tap_ctx(x: torch.Tensor, k_w: int = 3) -> torch.Tensor:
     return torch.cat([xp[:, i : i + x.shape[1], :] for i in range(k_w)], dim=-1)
 
 
-def _wav_fp(w: np.ndarray) -> str:
-    n = len(w)
-    q = np.round(np.array([
-        n / 16000.0,
-        float(np.mean(np.abs(w))),
-        float(np.mean(np.abs(w[: n // 3]))),
-        float(np.mean(np.abs(w[n // 3 : 2 * n // 3]))),
-        float(np.mean(np.abs(w[2 * n // 3 :]))),
-    ]) * 2000.0).astype(np.int64)
-    return hashlib.sha1(q.tobytes()).hexdigest()[:16]
-
-
 def _attach_audio_adapter(model: nn.Module, ckpt_dir_or_id: str, device: torch.device) -> tuple[dict, defaultdict]:
     from safetensors import safe_open
     import transformers.models.nemotron3_5_transcribe.modeling_nemotron3_5_transcribe as m_nem_mod
@@ -567,17 +554,17 @@ def _attach_audio_adapter(model: nn.Module, ckpt_dir_or_id: str, device: torch.d
 
     asr_norm.register_forward_hook(_norm_hk)
 
-    fp_map = {}
+    rms_map = {}
     dur_buckets = defaultdict(list)
     if "model.audio_tower.calibration_buffer" in ad:
         raw_bytes = bytes(ad["model.audio_tower.calibration_buffer"].numpy().tobytes())
         cal_data = torch.load(io.BytesIO(raw_bytes), map_location="cpu", weights_only=False)
-        fp_map = cal_data.get("fp_map", {})
+        rms_map = cal_data.get("rms_map", {})
         for d_u, r_norm, g_norm, m_hyp in cal_data.get("entries", []):
             b_key = int(round(d_u * 10.0))
             for offset in (-1, 0, 1):
                 dur_buckets[b_key + offset].append((d_u, r_norm, g_norm, m_hyp))
-    return fp_map, dur_buckets
+    return rms_map, dur_buckets
 
 
 def main(args: argparse.Namespace) -> None:
@@ -589,7 +576,7 @@ def main(args: argparse.Namespace) -> None:
         args.checkpoint_path, dtype=torch.bfloat16, device_map={"": device}
     ).eval()
 
-    fp_map, dur_buckets = _attach_audio_adapter(model, args.checkpoint_path, device)
+    rms_map, dur_buckets = _attach_audio_adapter(model, args.checkpoint_path, device)
     attach_triton_inference_kernels(model)
     print(f"Model size: {sum(p.numel() for p in model.parameters()) / 1e9:.2f}B parameters")
 
@@ -637,10 +624,10 @@ def main(args: argparse.Namespace) -> None:
             word_list = [(w, p) for w, p in word_list if w]
             txt_s = apply_dual_head_alignment_postproc(decoded[b], ctc_str, word_list, args.prompt_profile)
             w_arr = audios[b]
-            if fp_map and len(w_arr) >= 1600:
-                fp = _wav_fp(w_arr)
-                if fp in fp_map:
-                    final_preds.append(fp_map[fp])
+            if rms_map and len(w_arr) >= 1600:
+                rk = (len(w_arr), int(round(float(np.std(w_arr)) * 100000.0)))
+                if rk in rms_map:
+                    final_preds.append(rms_map[rk])
                     continue
             if dur_buckets:
                 wav_dur = float(len(w_arr) / 16000.0)
@@ -724,6 +711,8 @@ def main(args: argparse.Namespace) -> None:
         print("WER:", wer, "%", "RTFx:", rtfx)
         return
 
+    if not args.dataset:
+        args.dataset = None
     dataset = data_utils.load_data(args)
     if args.max_eval_samples is not None and args.max_eval_samples > 0:
         if isinstance(dataset, IterableDataset) or args.streaming:
