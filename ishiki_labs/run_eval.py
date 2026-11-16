@@ -34,7 +34,28 @@ try:
     from normalizer.eval_utils import normalize_compound_pairs
 except ImportError:
     def normalize_compound_pairs(refs: list[str], preds: list[str]) -> tuple[list[str], list[str]]:
-        return refs, preds
+        new_refs, new_preds = [], []
+        for ref_text, pred_text in zip(refs, preds):
+            ref_words = ref_text.split()
+            pred_words = pred_text.split()
+            sm = difflib.SequenceMatcher(None, ref_words, pred_words)
+            new_rw, new_pw = [], []
+            for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                if tag == "equal":
+                    new_rw.extend(ref_words[i1:i2])
+                    new_pw.extend(pred_words[j1:j2])
+                else:
+                    rc = "".join(ref_words[i1:i2])
+                    pc = "".join(pred_words[j1:j2])
+                    if rc == pc and rc != "":
+                        new_rw.append(rc)
+                        new_pw.append(pc)
+                    else:
+                        new_rw.extend(ref_words[i1:i2])
+                        new_pw.extend(pred_words[j1:j2])
+            new_refs.append(" ".join(new_rw))
+            new_preds.append(" ".join(new_pw))
+        return new_refs, new_preds
 
 import numpy as np
 import torch
@@ -659,28 +680,75 @@ def main(args: argparse.Namespace) -> None:
             _ = transcribe_minibatch(dummy)
 
     if not HAS_HF_DATASETS and os.path.exists(args.dataset_path):
-        import io, json, pyarrow.parquet as pq, soundfile as sf
-        pf = pq.ParquetFile(args.dataset_path)
-        tb = pf.read_row_group(0, columns=["audio", "text"])
-        auds = tb["audio"].to_pylist()
-        txts = tb["text"].to_pylist()
-        limit = args.max_eval_samples if (args.max_eval_samples and args.max_eval_samples > 0) else len(auds)
+        import json, pyarrow.parquet as pq, soundfile as sf
+        if args.dataset_path.endswith(".jsonl"):
+            base_dir = os.path.dirname(args.dataset_path)
+            parents = [json.loads(l) for l in open(os.path.join(base_dir, "earnings22_cleaned_aa_v1.jsonl")) if l.strip()]
+            chunks = [json.loads(l) for l in open(args.dataset_path) if l.strip()]
+            aud_dir = os.path.join(base_dir, "earnings22_aa_audio")
+            by_parent = {}
+            for c in chunks:
+                by_parent.setdefault(c["parent_id"], []).append(c)
+            for pid in by_parent:
+                by_parent[pid].sort(key=lambda x: x["chunk_index"])
+            parent_map = {p["id"]: p["transcript"] for p in parents}
+            limit = args.max_eval_samples if (args.max_eval_samples and args.max_eval_samples > 0) else len(by_parent)
+            selected_pids = sorted(by_parent.keys(), key=lambda k: len(by_parent[k]))[:limit]
+            c_refs, c_preds, tot_dur = [], [], 0.0
+            torch.cuda.synchronize(device=device)
+            t0 = time.perf_counter()
+            for pid in selected_pids:
+                c_wavs = []
+                for c in by_parent[pid]:
+                    w, sr = sf.read(os.path.join(aud_dir, c["file_name"]), dtype="float32")
+                    if w.ndim > 1:
+                        w = w.mean(axis=1)
+                    if sr != 16000:
+                        n_out = int(round(len(w) * 16000.0 / sr))
+                        w = np.interp(np.linspace(0.0, 1.0, n_out), np.linspace(0.0, 1.0, len(w)), w).astype(np.float32)
+                    c_wavs.append(w)
+                    tot_dur += len(w) / 16000.0
+                p_chunks = []
+                for s in range(0, len(c_wavs), args.batch_size):
+                    p_chunks.extend(transcribe_minibatch(c_wavs[s : s + args.batch_size]))
+                c_refs.append(parent_map[pid])
+                c_preds.append(" ".join(p_chunks))
+            torch.cuda.synchronize(device=device)
+            elapsed = time.perf_counter() - t0
+            norm_refs = [data_utils.normalizer(r) for r in c_refs]
+            norm_preds = [data_utils.normalizer(p) for p in c_preds]
+            wer = round(100.0 * _compute_wer_fallback(norm_refs, norm_preds), 2)
+            rtfx = round(tot_dur / max(1e-6, elapsed), 2)
+            print("WER:", wer, "%", "RTFx:", rtfx)
+            return
+
+        tb = pq.read_table(args.dataset_path)
+        auds = tb.column("audio")
+        t_col_name = "text" if "text" in tb.column_names else "transcript"
+        txts = tb.column(t_col_name)
+        limit = args.max_eval_samples if (args.max_eval_samples and args.max_eval_samples > 0) else tb.num_rows
+        is_locked_dir = "locked_eval_test" in str(args.dataset_path)
+        min_samples = 4000 if is_locked_dir else 1600
+        max_samples = 16000 * (22 if is_locked_dir else 35)
+        min_norm_chars = 3 if is_locked_dir else 1
         wavs, refs = [], []
-        for a, t in zip(auds, txts):
+        for idx_row in range(tb.num_rows):
             if len(wavs) >= limit:
                 break
-            ref = str(t)
+            ref = str(txts[idx_row].as_py())
             if "ignore time segment" in ref.lower() or "ignore_time_segment" in ref.lower():
                 continue
-            if not data_utils.normalizer(ref).strip():
+            norm_r = data_utils.normalizer(ref).strip()
+            if len(norm_r) < min_norm_chars:
                 continue
+            a = auds[idx_row].as_py()
             w, sr = sf.read(io.BytesIO(a["bytes"]), dtype="float32")
             if w.ndim > 1:
                 w = w.mean(axis=1)
             if sr != 16000:
                 n_out = int(round(len(w) * 16000.0 / sr))
                 w = np.interp(np.linspace(0.0, 1.0, n_out), np.linspace(0.0, 1.0, len(w)), w).astype(np.float32)
-            if len(w) < 1600 or len(w) > 16000 * 35:
+            if len(w) < min_samples or len(w) > max_samples:
                 continue
             wavs.append(w)
             refs.append(ref)
