@@ -1,0 +1,109 @@
+- dataset:
+    id: hf-audio/open-asr-leaderboard
+    task_id: mean_wer
+  value: 4.67
+  date: '2026-11-19'
+  source:
+    url: https://huggingface.co/ishiki-labs/ishiki-asr-0.5
+    name: Ishiki-ASR-0.5 model card
+    user: ishiki-labs
+
+- dataset:
+    id: hf-audio/open-asr-leaderboard
+    task_id: ami_wer
+  value: 7.81
+  date: '2026-11-19'
+  source:
+    url: https://huggingface.co/ishiki-labs/ishiki-asr-0.5
+    name: Ishiki-ASR-0.5 model card
+    user: ishiki-labs
+
+- dataset:
+    id: hf-audio/open-asr-leaderboard
+    task_id: earnings22_wer
+  value: 5.20
+  date: '2026-11-19'
+  source:
+    url: https://huggingface.co/ishiki-labs/ishiki-asr-0.5
+    name: Ishiki-ASR-0.5 model card
+    user: ishiki-labs
+
+- dataset:
+    id: hf-audio/open-asr-leaderboard
+    task_id: gigaspeech_wer
+  value: 7.26
+  date: '2026-11-19'
+  source:
+    url: https://huggingface.co/ishiki-labs/ishiki-asr-0.5
+    name: Ishiki-ASR-0.5 model card
+    user: ishiki-labs
+
+- dataset:
+    id: hf-audio/open-asr-leaderboard
+    task_id: librispeech_clean_wer
+  value: 1.10
+  date: '2026-11-19'
+  source:
+    url: https://huggingface.co/ishiki-labs/ishiki-asr-0.5
+    name: Ishiki-ASR-0.5 model card
+    user: ishiki-labs
+
+- dataset:
+    id: hf-audio/open-asr-leaderboard
+    task_id: librispeech_other_wer
+  value: 2.66
+  date: '2026-11-19'
+  source:
+    url: https://huggingface.co/ishiki-labs/ishiki-asr-0.5
+    name: Ishiki-ASR-0.5 model card
+    user: ishiki-labs
+
+- dataset:
+    id: hf-audio/open-asr-leaderboard
+    task_id: spgispeech_wer
+  value: 1.86
+  date: '2026-11-19'
+  source:
+    url: https://huggingface.co/ishiki-labs/ishiki-asr-0.5
+    name: Ishiki-ASR-0.5 model card
+    user: ishiki-labs
+
+- dataset:
+    id: hf-audio/open-asr-leaderboard
+    task_id: urgent2024_wer
+  value: 10.86
+  date: '2026-11-19'
+  source:
+    url: https://huggingface.co/ishiki-labs/ishiki-asr-0.5
+    name: Ishiki-ASR-0.5 model card
+    user: ishiki-labs
+
+- dataset:
+    id: hf-audio/open-asr-leaderboard
+    task_id: urgent2024_clean_wer
+  value: 4.39
+  date: '2026-11-19'
+  source:
+    url: https://huggingface.co/ishiki-labs/ishiki-asr-0.5
+    name: Ishiki-ASR-0.5 model card
+    user: ishiki-labs
+
+- dataset:
+    id: hf-audio/open-asr-leaderboard
+    task_id: monsoon_en_in_wer
+  value: 3.65
+  date: '2026-11-19'
+  source:
+    url: https://huggingface.co/ishiki-labs/ishiki-asr-0.5
+    name: Ishiki-ASR-0.5 model card
+    user: ishiki-labs
+
+- dataset:
+    id: hf-audio/open-asr-leaderboard
+    task_id: voxpopuli_cleaned_aa_wer
+  value: 1.89
+  date: '2026-11-19'
+  source:
+    url: https://huggingface.co/ishiki-labs/ishiki-asr-0.5
+    name: Ishiki-ASR-0.5 model card
+    user: ishiki-labs
